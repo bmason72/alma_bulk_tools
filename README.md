@@ -1,0 +1,283 @@
+# alma-bulk-tools
+
+CLI-first Python 3.11 utilities to discover, download, unpack, summarize, and index large numbers of **public** ALMA datasets.
+
+## Install
+
+```bash
+pip install -e .[dev]
+```
+
+## What this repo provides
+
+- `alma-bulk discover`: query ALMA TAP (`ivoa.obscore`) for public MOUS candidates in a date range.
+- `alma-bulk download`: enumerate archive deliverables via datalink and download selected kinds with resume + atomic rename.
+- `alma-bulk unpack`: unpack archive bundles with conservative defaults (auxiliary/readme archive unpack in-place, tar cleanup on).
+- `alma-bulk summarize`: generate per-MOUS `almaBulkSummary.json` (+ optional `summary.md`) from metadata + AQUA + flag templates.
+- `alma-bulk scan`: index existing trees even if `run1/` or `delivered/` are missing, with optional `--fix-layout`.
+- `alma-bulk plan`: shard candidate lists for job arrays.
+- `alma-bulk run-shard`: deterministic per-shard processing with optional runtime bound.
+- `alma-bulk merge-index`: idempotent merge of shard outputs into central SQLite.
+- `alma-bulk status`: concise CLI dashboard for progress/failures/coverage.
+
+## Directory layout
+
+Per MOUS, the tool creates an ASA-like tree:
+
+```text
+<project_code>/science_goal.uid___<UID>/group.uid___<UID>/member.uid___<MOUSUID>/
+  delivered/
+  run1/
+  almaBulkManifest.json
+  almaBulkSummary.json
+```
+
+If science goal / group OUS UIDs are unavailable from query results, fallback directories are:
+
+- `science_goal.uid___unknown`
+- `group.uid___unknown`
+
+The design intent is to follow ScriptForPI-style structure as closely as possible while treating `member.uid___.../delivered` as the deliverable root for unpacked contents.
+If a pre-existing legacy layout is already present, it is reused and not moved.
+
+## Explicit default behaviors
+
+- Discovery uses public data only (`data_rights='Public'`).
+- Artifact selection defaults (when `download.artifacts` is null/omitted) include:
+  - `calibration`: ON
+  - `scripts`: ON
+  - `weblog`: ON
+  - `qa_reports`: ON
+  - `auxiliary`: ON
+  - `readme`: ON
+  - `calibration_products`: ON
+- Artifact selection default excludes:
+  - `raw`: OFF
+  - `continuum_images`: OFF
+  - `cubes`: OFF
+  - `admit`: OFF
+- Unpack defaults:
+  - `unpack_auxiliary`: ON
+  - `unpack_readme_archives`: ON
+  - `unpack_weblog_archives`: ON
+  - `unpack_other_archives`: OFF
+  - unpack location: **in-place** (same directory as the archive file, usually `delivered/`)
+  - strip redundant archive-internal ASA prefix when present (avoids duplicated nested trees under `delivered/`)
+  - `remove_archives_after_unpack`: ON
+  - recursive unpack enabled for nested `*.auxproducts*`, `*.caltables*`, `*weblog*`, and `*readme*` archives
+  - recursive unpack default excludes `*flagversions.tgz`
+- Terminology:
+  - `auxiliary` means the top-level archive deliverable from datalink (e.g. `*_auxiliary.tar`).
+  - nested `auxproducts.tgz` files inside delivered content are unpacked recursively by default.
+- Re-runs are incremental/idempotent:
+  - broader artifact sets only fetch missing deliverables
+  - manifests are updated without deleting user content
+
+## Config-first usage
+
+Use YAML config for normal workflows; CLI flags override config values.
+For commands that need a dataset store, use either `--dest` or `paths.dest` in config.
+
+Repository example file: `config.example.workflow1.yaml`.
+
+### Example config (workflow 1)
+
+This example is tuned for a high-priority flow: process an allowlist of “as-delivered” MOUS, focusing on calibration + auxiliary + scripts/weblog/QA reports with no continuum/cube/raw downloads.
+
+```yaml
+paths:
+  dest: /path/to/alma_public_store  # optional if you still pass --dest on CLI
+
+archive:
+  tap_sync_url: https://almascience.nrao.edu/tap/sync
+  datalink_sync_url: https://almascience.nrao.edu/datalink/sync
+  timeout_sec: 120
+  user_agent: alma-bulk-tools/0.1.0
+
+filters:
+  date_field: release              # allowed: release | observation
+  exclude_tp: false                # allowed: true/false
+  exclude_7m: false                # allowed: true/false
+  bands_include: []                # list or file path (.txt/.csv/.json/.yaml)
+  bands_exclude: []                # e.g. ["9", "10"]
+  project_codes_include: []        # list or file path
+  project_codes_exclude: []        # list or file path
+  mous_include: /path/to/mous_uids.txt   # workflow 1 allowlist
+  mous_exclude: []                 # list or file path
+  min_freq_ghz: null               # optional float
+  max_freq_ghz: null               # optional float
+
+download:
+  # Optional explicit selector string. If null, selection is built from
+  # download.deliverables + download.products.
+  # allowed tokens: default, all-nonimage, +token, -token
+  # token names: calibration,scripts,weblog,qa_reports,auxiliary,readme,raw,
+  #              calibration_products,continuum_images,cubes,admit
+  artifacts: null
+
+  # Archive deliverables (workflow 1 focused defaults)
+  deliverables:
+    calibration: true
+    scripts: true
+    weblog: true
+    qa_reports: true
+    auxiliary: true
+    readme: true
+    raw: false
+
+  # Pipeline product categories
+  products:
+    calibration_products: true
+    continuum_images: false
+    cubes: false
+    admit: false
+
+  max_workers: 4
+  rate_limit_sec: 0.0
+  retry_count: 3
+  compute_sha256: false
+
+unpack:
+  unpack_auxiliary: true
+  unpack_readme_archives: true
+  unpack_weblog_archives: true
+  unpack_other_archives: false     # set true to unpack non-aux tarballs too
+  remove_archives_after_unpack: true
+  recursive_unpack_enabled: true
+  # default recursive list intentionally excludes *flagversions.tgz
+  recursive_unpack_patterns:
+    - "*.auxproducts.tgz"
+    - "*.auxproducts.tar.gz"
+    - "*.auxproducts.tar"
+    - "*.caltables.tgz"
+    - "*.caltables.tar.gz"
+    - "*.caltables.tar"
+    - "*weblog*.tgz"
+    - "*weblog*.tar.gz"
+    - "*weblog*.tar"
+    - "*readme*.tgz"
+    - "*readme*.tar.gz"
+    - "*readme*.tar"
+  recursive_unpack_max_passes: 3
+
+runtime:
+  max_runtime_min: null
+  log_level: INFO                  # DEBUG|INFO|WARNING|ERROR
+```
+
+Long include/exclude lists can be inline in YAML or passed as file paths (`.txt/.csv/.json/.yaml`).
+
+## Artifact selection
+
+Supported `--artifacts` token patterns:
+
+- `default`
+- `all-nonimage`
+- `+weblog`, `+readme`, `+raw`, `-cubes`, etc.
+
+Examples:
+
+- `--artifacts default`
+- `--artifacts default,+raw`
+- `--artifacts all-nonimage`
+
+## Required usage examples
+
+Discover + download for a release date range:
+
+```bash
+alma-bulk discover --date-field release --start 2024-01-01 --end 2024-03-01 --exclude-tp --bands exclude:9,10 --out candidates.jsonl
+alma-bulk download --input candidates.jsonl --dest /data/alma_public --artifacts default --max-workers 4
+alma-bulk unpack --dest /data/alma_public
+alma-bulk summarize --dest /data/alma_public
+```
+
+Re-run later with broader artifact set (only missing deliverables are fetched):
+
+```bash
+alma-bulk download --dest /data/alma_public --artifacts default,+raw
+```
+
+Scan existing store and rebuild DB:
+
+```bash
+alma-bulk scan --dest /data/alma_public --rebuild-db
+```
+
+## TACC workflow (2-day reservation friendly)
+
+1. Discover + plan shards:
+
+```bash
+alma-bulk discover --config config.yaml --start 2024-01-01 --end 2024-03-01 --out candidates.jsonl
+alma-bulk plan --config config.yaml --input candidates.jsonl --out shards/ --shard-size 200
+```
+
+2. Download where egress is allowed:
+
+```bash
+alma-bulk download --config config.yaml --input candidates.jsonl --dest $SCRATCH/alma_public --artifacts default --max-workers 4
+```
+
+3. Process shards on compute nodes:
+
+```bash
+alma-bulk run-shard --config config.yaml --dest $SCRATCH/alma_public --shard shards/part-0007.jsonl --max-runtime-min 2800
+```
+
+4. Merge + status:
+
+```bash
+alma-bulk merge-index --dest $SCRATCH/alma_public --shards shards/
+alma-bulk status --dest $SCRATCH/alma_public
+```
+
+Example SLURM array snippet:
+
+```bash
+#!/bin/bash
+#SBATCH -J alma-shards
+#SBATCH -A <account>
+#SBATCH -p normal
+#SBATCH -N 1
+#SBATCH -n 1
+#SBATCH -t 47:00:00
+#SBATCH --array=0-99
+
+SHARD=$(printf "shards/part-%04d.jsonl" "$SLURM_ARRAY_TASK_ID")
+alma-bulk run-shard --config config.yaml --dest $SCRATCH/alma_public --shard "$SHARD" --max-runtime-min 2800
+```
+
+## DB and outputs
+
+- Central DB: `<dest>/alma_index.sqlite`
+- Per-shard DB (from `run-shard`): alongside shard file, e.g. `shards/part-0007.sqlite`
+- Per-MOUS:
+  - `almaBulkManifest.json`
+  - `almaBulkSummary.json` (schema v2 with MOUS metadata, QA block, and run-level evidence for `delivered`/`run1`)
+  - optional `summary.md`
+
+Status report includes:
+
+- discovered/downloaded/unpacked/summarized/indexed counts
+- failure counts by stage + top error messages
+- coverage by band + release-month bins
+- to-do list (missing AQUA evidence, missing summary, failed downloads)
+
+## Notes on archive API fields and assumptions
+
+This implementation uses ALMA TAP `ivoa.obscore` columns documented in current ALMA notebooks/manual examples (e.g., `proposal_id`, `member_ous_uid`, `group_ous_uid`, `asdm_uid`, `band_list`, `obs_release_date`, `t_min`, `qa2_passed`).
+
+- Public filtering uses `data_rights = 'Public'`.
+- MOUS records are grouped from EB-level rows by `member_ous_uid`.
+- Datalink lookups normalize `member_ous_uid` from `uid://...` to `uid___...` (as used in archive notebook download examples).
+- Band filters handle both numeric `band_list` values (e.g. `6`) and `BAND N` formatted values.
+- `exclude_tp` / `exclude_7m` use `antenna_arrays` heuristics (`PM/TP` and `CM/7m` patterns), which matches archive examples but remains best-effort.
+- QA0 per-EB status may be explicit from archive metadata when available; otherwise summaries infer `PASS` for EBs present in `delivered` and `SEMIPASS` for EBs present only in `run1`, with explicit suggested-source markers.
+- Datalink artifact kind classification is conservative and filename/semantics based; modules are separated so backend mapping can be swapped without rewriting pipeline stages.
+
+## Tests
+
+```bash
+pytest
+```

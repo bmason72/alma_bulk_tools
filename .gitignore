@@ -3,4 +3,7 @@ __pycache__/
 candidates.jsonl
 candidates2.jsonl
 candidatesNew.jsonl
-
+*.pyc
+.venv/
+.env
+.ipynb_checkpoints

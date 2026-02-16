@@ -1,0 +1,9 @@
+[console_scripts]
+alma-bulk = alma_bulk_tools.cli:main
+alma-discover = alma_bulk_tools.cli:main_discover
+alma-download = alma_bulk_tools.cli:main_download
+alma-index-scan = alma_bulk_tools.cli:main_scan
+alma-merge-index = alma_bulk_tools.cli:main_merge_index
+alma-status = alma_bulk_tools.cli:main_status
+alma-summarize = alma_bulk_tools.cli:main_summarize
+alma-unpack = alma_bulk_tools.cli:main_unpack

@@ -1,0 +1,72 @@
+paths:
+  dest: /path/to/alma_public_store
+
+archive:
+  tap_sync_url: https://almascience.nrao.edu/tap/sync
+  datalink_sync_url: https://almascience.nrao.edu/datalink/sync
+  timeout_sec: 120
+  user_agent: alma-bulk-tools/0.1.0
+
+filters:
+  date_field: release
+  exclude_tp: false
+  exclude_7m: false
+  bands_include: []
+  bands_exclude: []
+  project_codes_include: []
+  project_codes_exclude: []
+  mous_include: /path/to/mous_uids.txt
+  mous_exclude: []
+  min_freq_ghz: null
+  max_freq_ghz: null
+
+download:
+  # Optional explicit selector string. Leave null to use deliverables+products.
+  artifacts: null
+
+  deliverables:
+    calibration: true
+    scripts: true
+    weblog: true
+    qa_reports: true
+    auxiliary: true
+    readme: true
+    raw: false
+
+  products:
+    calibration_products: true
+    continuum_images: false
+    cubes: false
+    admit: false
+
+  max_workers: 4
+  rate_limit_sec: 0.0
+  retry_count: 3
+  compute_sha256: false
+
+unpack:
+  unpack_auxiliary: true
+  unpack_readme_archives: true
+  unpack_weblog_archives: true
+  unpack_other_archives: false
+  remove_archives_after_unpack: true
+  recursive_unpack_enabled: true
+  # Default recursive unpack list intentionally excludes *flagversions.tgz
+  recursive_unpack_patterns:
+    - "*.auxproducts.tgz"
+    - "*.auxproducts.tar.gz"
+    - "*.auxproducts.tar"
+    - "*.caltables.tgz"
+    - "*.caltables.tar.gz"
+    - "*.caltables.tar"
+    - "*weblog*.tgz"
+    - "*weblog*.tar.gz"
+    - "*weblog*.tar"
+    - "*readme*.tgz"
+    - "*readme*.tar.gz"
+    - "*readme*.tar"
+  recursive_unpack_max_passes: 3
+
+runtime:
+  max_runtime_min: null
+  log_level: INFO
