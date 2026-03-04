@@ -25,6 +25,7 @@ dev = [
 alma-bulk = "alma_bulk_tools.cli:main"
 alma-discover = "alma_bulk_tools.cli:main_discover"
 alma-download = "alma_bulk_tools.cli:main_download"
+alma-sample = "alma_bulk_tools.cli:main_sample"
 alma-unpack = "alma_bulk_tools.cli:main_unpack"
 alma-summarize = "alma_bulk_tools.cli:main_summarize"
 alma-index-scan = "alma_bulk_tools.cli:main_scan"

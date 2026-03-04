@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 import xml.etree.ElementTree as ET
+import csv
 
 import requests
 from tqdm import tqdm
@@ -457,6 +458,8 @@ def download_for_record(
 
 
 def read_candidates_jsonl(path: Path) -> list[MousRecord]:
+    if path.suffix.lower() != ".jsonl":
+        return read_candidates_text(path)
     out: list[MousRecord] = []
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
@@ -486,6 +489,9 @@ def read_candidates_jsonl(path: Path) -> list[MousRecord]:
 
 
 def write_candidates_jsonl(path: Path, rows: list[MousRecord], adql: str) -> None:
+    if path.suffix.lower() != ".jsonl":
+        write_candidates_text(path, rows, adql)
+        return
     ensure_dir(path.parent)
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
@@ -493,3 +499,183 @@ def write_candidates_jsonl(path: Path, rows: list[MousRecord], adql: str) -> Non
             payload["query_adql"] = adql
             payload["query_timestamp"] = now_utc_iso()
             handle.write(json.dumps(payload) + "\n")
+
+
+def _format_float(value: Any, ndigits: int = 3) -> str:
+    if value in (None, ""):
+        return ""
+    return f"{float(value):.{ndigits}f}".rstrip("0").rstrip(".")
+
+
+def _format_bandwidth_mhz(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    mhz = float(value)
+    if mhz >= 1000.0:
+        return f"{mhz / 1000.0:.3f}".rstrip("0").rstrip(".") + " GHz"
+    return f"{mhz:.3f}".rstrip("0").rstrip(".") + " MHz"
+
+
+def _parse_bandwidth_mhz(value: str | None) -> float | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    parts = text.split()
+    try:
+        amount = float(parts[0])
+    except ValueError:
+        return None
+    unit = parts[1].lower() if len(parts) > 1 else "mhz"
+    if unit == "ghz":
+        return amount * 1000.0
+    if unit == "khz":
+        return amount / 1000.0
+    if unit == "hz":
+        return amount / 1_000_000.0
+    return amount
+
+
+def _text_candidate_row(record: MousRecord) -> dict[str, str]:
+    meta = record.archive_meta or {}
+    bands = ",".join(record.band_list)
+    eb_uids = ";".join(record.eb_uids)
+    qa2_status = str(meta.get("qa2_status") or ("PASS" if record.qa2_passed else "FAIL" if record.qa2_passed is False else "UNKNOWN"))
+    is_mosaic = meta.get("is_mosaic")
+    if is_mosaic is True:
+        is_mosaic_text = "Y"
+    elif is_mosaic is False:
+        is_mosaic_text = "N"
+    else:
+        is_mosaic_text = ""
+    return {
+        "project_code": record.project_code,
+        "science_category": str(meta.get("science_category") or ""),
+        "mous_uid": record.member_ous_uid,
+        "sb_name": str(meta.get("sb_name") or ""),
+        "executions": str(meta.get("execution_count") or len(record.eb_uids) or ""),
+        "spws": str(meta.get("spw_count") or ""),
+        "band": bands,
+        "min_spw_total_width": _format_bandwidth_mhz(meta.get("min_spw_total_width_mhz")),
+        "max_spw_total_width": _format_bandwidth_mhz(meta.get("max_spw_total_width_mhz")),
+        "min_nchan": str(meta.get("min_nchan") or ""),
+        "max_nchan": str(meta.get("max_nchan") or ""),
+        "array": str(meta.get("array") or ""),
+        "max_baseline_m": _format_float(meta.get("max_baseline_m"), ndigits=1),
+        "science_targets": str(meta.get("science_target_count") or ""),
+        "is_mosaic": is_mosaic_text,
+        "qa2_status": qa2_status,
+        "observation_date": str(record.obs_date or ""),
+        "delivery_date": str(record.release_date or ""),
+        "group_ous_uid": str(record.group_ous_uid or ""),
+        "science_goal_uid": str(record.science_goal_uid or ""),
+        "eb_uids": eb_uids,
+    }
+
+
+def write_candidates_text(path: Path, rows: list[MousRecord], adql: str) -> None:
+    ensure_dir(path.parent)
+    fieldnames = [
+        "project_code",
+        "science_category",
+        "mous_uid",
+        "sb_name",
+        "executions",
+        "spws",
+        "band",
+        "min_spw_total_width",
+        "max_spw_total_width",
+        "min_nchan",
+        "max_nchan",
+        "array",
+        "max_baseline_m",
+        "science_targets",
+        "is_mosaic",
+        "qa2_status",
+        "observation_date",
+        "delivery_date",
+        "group_ous_uid",
+        "science_goal_uid",
+        "eb_uids",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write("# alma-bulk discover candidates\n")
+        handle.write(f"# created_at: {now_utc_iso()}\n")
+        handle.write("# delete any data lines you do not want to process\n")
+        handle.write("# lines beginning with # are ignored by download/plan/run-shard\n")
+        handle.write(f"# query_adql: {adql}\n")
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for record in rows:
+            writer.writerow(_text_candidate_row(record))
+
+
+def _parse_boolish(value: str | None) -> bool | None:
+    if value is None:
+        return None
+    text = value.strip().lower()
+    if text in {"y", "yes", "true", "t", "1"}:
+        return True
+    if text in {"n", "no", "false", "f", "0"}:
+        return False
+    return None
+
+
+def _parse_candidates_text_row(row: dict[str, str]) -> MousRecord:
+    band_list = [part.strip() for part in (row.get("band") or "").split(",") if part.strip()]
+    eb_uids = [part.strip() for part in (row.get("eb_uids") or "").split(";") if part.strip()]
+    qa2_status = (row.get("qa2_status") or "").strip().upper()
+    qa2_passed: bool | None
+    if qa2_status == "PASS":
+        qa2_passed = True
+    elif qa2_status == "FAIL":
+        qa2_passed = False
+    else:
+        qa2_passed = None
+    archive_meta = {
+        "sb_name": (row.get("sb_name") or "").strip() or None,
+        "science_category": (row.get("science_category") or "").strip() or None,
+        "execution_count": int(row["executions"]) if (row.get("executions") or "").strip().isdigit() else len(eb_uids),
+        "spw_count": int(row["spws"]) if (row.get("spws") or "").strip().isdigit() else None,
+        "min_spw_total_width_mhz": _parse_bandwidth_mhz(row.get("min_spw_total_width") or row.get("min_spw_width_khz")),
+        "max_spw_total_width_mhz": _parse_bandwidth_mhz(row.get("max_spw_total_width") or row.get("max_spw_width_khz")),
+        "min_nchan": int(row["min_nchan"]) if (row.get("min_nchan") or "").strip().isdigit() else None,
+        "max_nchan": int(row["max_nchan"]) if (row.get("max_nchan") or "").strip().isdigit() else None,
+        "array": ((row.get("array") or row.get("configuration") or "").strip() or "UNKNOWN"),
+        "max_baseline_m": float(row["max_baseline_m"]) if (row.get("max_baseline_m") or "").strip() else None,
+        "science_target_count": int(row["science_targets"]) if (row.get("science_targets") or "").strip().isdigit() else 0,
+        "is_mosaic": _parse_boolish(row.get("is_mosaic")),
+        "qa2_status": qa2_status or "UNKNOWN",
+    }
+    return MousRecord(
+        project_code=row["project_code"],
+        member_ous_uid=row["mous_uid"],
+        group_ous_uid=(row.get("group_ous_uid") or "").strip() or None,
+        science_goal_uid=(row.get("science_goal_uid") or "").strip() or None,
+        eb_uids=eb_uids,
+        band_list=band_list,
+        release_date=(row.get("delivery_date") or "").strip() or None,
+        obs_date=(row.get("observation_date") or "").strip() or None,
+        qa2_passed=qa2_passed,
+        source_rows=archive_meta["execution_count"],
+        archive_meta=archive_meta,
+    )
+
+
+def read_candidates_text(path: Path) -> list[MousRecord]:
+    out: list[MousRecord] = []
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        rows = [line for line in handle if line.strip() and not line.lstrip().startswith("#")]
+    if not rows:
+        return out
+    reader = csv.DictReader(rows)
+    for row in reader:
+        if not row:
+            continue
+        mous_uid = (row.get("mous_uid") or "").strip()
+        project_code = (row.get("project_code") or "").strip()
+        if not mous_uid or not project_code:
+            continue
+        out.append(_parse_candidates_text_row({key: value or "" for key, value in row.items()}))
+    return out

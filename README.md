@@ -16,9 +16,14 @@ pip install -e .[dev]
 - `alma-bulk summarize`: generate per-MOUS `almaBulkSummary.json` (+ optional `summary.md`) from metadata + AQUA + flag templates.
 - `alma-bulk scan`: index existing trees even if `run1/` or `delivered/` are missing, with optional `--fix-layout`.
 - `alma-bulk plan`: shard candidate lists for job arrays.
+- `alma-bulk sample`: build a reproducible stratified sample from discovered candidates and emit coverage visualizations.
 - `alma-bulk run-shard`: deterministic per-shard processing with optional runtime bound.
 - `alma-bulk merge-index`: idempotent merge of shard outputs into central SQLite.
 - `alma-bulk status`: concise CLI dashboard for progress/failures/coverage.
+
+`discover` supports two candidate file formats:
+- `.jsonl`: machine-oriented records
+- `.txt` / `.csv`: editable comma-separated text with comment lines; delete rows and feed the file directly to `download`, `plan`, or `run-shard`
 
 ## Directory layout
 
@@ -186,11 +191,90 @@ Examples:
 Discover + download for a release date range:
 
 ```bash
-alma-bulk discover --date-field release --start 2024-01-01 --end 2024-03-01 --exclude-tp --bands exclude:9,10 --out candidates.jsonl
-alma-bulk download --input candidates.jsonl --dest /data/alma_public --artifacts default --max-workers 4
+alma-bulk discover --date-field release --start 2024-01-01 --end 2024-03-01 --exclude-tp --bands exclude:9,10 --out candidates.txt
+alma-bulk download --input candidates.txt --dest /data/alma_public --artifacts default --max-workers 4
 alma-bulk unpack --dest /data/alma_public
 alma-bulk summarize --dest /data/alma_public
 ```
+
+Editable text candidate files include one line per MOUS with:
+- project code
+- science category
+- MOUS UID
+- SB name
+- number of executions
+- number of SPWs
+- band
+- minimum / maximum total SPW width in MHz/GHz
+- minimum / maximum SPW NCHAN
+- array summary (`12m`, `7m`, `TP` from archive metadata)
+- inferred maximum baseline in meters from archive `spatial_resolution` and representative `frequency`
+- number of science targets
+- mosaic flag
+- QA2 status
+- observation date
+- delivery date
+
+Delete the MOUS rows you do not want and pass the edited file directly to `download`, `plan`, or `run-shard`.
+
+## Stratified sampling
+
+Use `sample` after `discover` when you want a smaller but deliberately diverse validation/test set.
+
+```bash
+alma-bulk sample --input candidates.txt --out sampled.txt --target-size 200 --seed 7 --max-per-project 2
+```
+
+The sampler is coverage-oriented rather than purely random:
+- it bins continuous archive-derived fields
+- it greedily maximizes coverage of single-dimension bins and pairwise combinations
+- it can cap per-project contribution with `--max-per-project`
+- it writes a separate supplemental sample with one random `7m` or `12m` MOUS from each project that received no MOUS in the primary stratified sample
+
+Current sampling dimensions:
+- `science_category`
+- `band`
+- `array`
+- `max_baseline_bin`
+- `min_spw_width_bin`
+- `max_spw_width_bin`
+
+Current fixed max-baseline bin centers:
+- `55 m`
+- `160 m`
+- `300 m`
+- `500 m`
+- `780 m`
+- `1400 m`
+- `2500 m`
+- `3600 m`
+- `8500 m`
+- `13900 m`
+- `16200 m`
+
+Current SPW-width bin centers:
+- `15.625 MHz`
+- `31.25 MHz`
+- `62.5 MHz`
+- `120 MHz`
+- `234.375 MHz`
+- `468.75 MHz`
+- `937.5 MHz`
+- `1.875 GHz`
+- `2 GHz`
+
+The command writes:
+- the sampled candidate file at `--out`
+- a supplemental candidate file beside it (`<stem>.supplemental<suffix>`)
+- `coverage_report.html` with several 2D grid projections
+- `summary.json` in the report directory
+
+The HTML report currently includes these 2D grids:
+- `science_category` vs `band`
+- `science_category` vs `max_baseline_bin`
+- `band` vs `array`
+- `max_baseline_bin` vs `max_spw_width_bin`
+- `min_spw_width_bin` vs `max_spw_width_bin`
 
 Re-run later with broader artifact set (only missing deliverables are fetched):
 
@@ -209,14 +293,14 @@ alma-bulk scan --dest /data/alma_public --rebuild-db
 1. Discover + plan shards:
 
 ```bash
-alma-bulk discover --config config.yaml --start 2024-01-01 --end 2024-03-01 --out candidates.jsonl
-alma-bulk plan --config config.yaml --input candidates.jsonl --out shards/ --shard-size 200
+alma-bulk discover --config config.yaml --start 2024-01-01 --end 2024-03-01 --out candidates.txt
+alma-bulk plan --config config.yaml --input candidates.txt --out shards/ --shard-size 200
 ```
 
 2. Download where egress is allowed:
 
 ```bash
-alma-bulk download --config config.yaml --input candidates.jsonl --dest $SCRATCH/alma_public --artifacts default --max-workers 4
+alma-bulk download --config config.yaml --input candidates.txt --dest $SCRATCH/alma_public --artifacts default --max-workers 4
 ```
 
 3. Process shards on compute nodes:
@@ -273,6 +357,7 @@ This implementation uses ALMA TAP `ivoa.obscore` columns documented in current A
 - Datalink lookups normalize `member_ous_uid` from `uid://...` to `uid___...` (as used in archive notebook download examples).
 - Band filters handle both numeric `band_list` values (e.g. `6`) and `BAND N` formatted values.
 - `exclude_tp` / `exclude_7m` use `antenna_arrays` heuristics (`PM/TP` and `CM/7m` patterns), which matches archive examples but remains best-effort.
+- Candidate text files derive array membership from `antenna_arrays`, total SPW width/NCHAN from `frequency_support`, and infer maximum baseline from ObsCore `spatial_resolution` and `frequency`.
 - QA0 per-EB status may be explicit from archive metadata when available; otherwise summaries infer `PASS` for EBs present in `delivered` and `SEMIPASS` for EBs present only in `run1`, with explicit suggested-source markers.
 - Datalink artifact kind classification is conservative and filename/semantics based; modules are separated so backend mapping can be swapped without rewriting pipeline stages.
 

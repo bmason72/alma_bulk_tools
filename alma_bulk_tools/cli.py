@@ -23,6 +23,7 @@ from .layout import (
     find_mous_dirs,
 )
 from .models import MousRecord
+from .sample import create_stratified_sample
 from .status import build_status_report, format_status_report
 from .summarize import summarize_mous
 from .unpack import unpack_mous_delivered
@@ -160,6 +161,15 @@ def _create_parser() -> argparse.ArgumentParser:
     plan.add_argument("--input", type=Path, required=True)
     plan.add_argument("--out", type=Path, required=True)
     plan.add_argument("--shard-size", type=int, default=200)
+
+    sample = sub.add_parser("sample", help="Select a stratified sample from discover candidates")
+    sample.add_argument("--config", type=Path)
+    sample.add_argument("--input", type=Path, required=True)
+    sample.add_argument("--out", type=Path, required=True)
+    sample.add_argument("--report-dir", type=Path, default=None)
+    sample.add_argument("--target-size", type=int, default=None)
+    sample.add_argument("--seed", type=int, default=0)
+    sample.add_argument("--max-per-project", type=int, default=2)
 
     run_shard = sub.add_parser("run-shard", help="Process one shard (download optional, unpack, summarize, shard index)")
     run_shard.add_argument("--config", type=Path)
@@ -453,6 +463,34 @@ def _command_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _command_sample(args: argparse.Namespace) -> int:
+    records = read_candidates_jsonl(args.input)
+    if not records:
+        print("No candidate records to sample")
+        return 0
+    report_dir = args.report_dir or args.out.with_suffix("")
+    if report_dir == args.out:
+        report_dir = args.out.parent / f"{args.out.stem}_report"
+    summary = create_stratified_sample(
+        records=records,
+        out_path=args.out,
+        report_dir=report_dir,
+        target_size=args.target_size,
+        seed=args.seed,
+        max_per_project=args.max_per_project,
+    )
+    print(
+        "Sampled {selected_records}/{input_records} records to {out}; supplemental={supplemental}; report={report}".format(
+            selected_records=summary["selected_records"],
+            input_records=summary["input_records"],
+            out=args.out,
+            supplemental=summary["supplemental_output_path"],
+            report=report_dir,
+        )
+    )
+    return 0
+
+
 def _command_run_shard(args: argparse.Namespace) -> int:
     cfg = load_config(args.config)
     dest = _resolve_dest(args, cfg)
@@ -623,6 +661,8 @@ def main(argv: list[str] | None = None) -> int:
             return _command_scan(args)
         if args.cmd == "plan":
             return _command_plan(args)
+        if args.cmd == "sample":
+            return _command_sample(args)
         if args.cmd == "run-shard":
             return _command_run_shard(args)
         if args.cmd == "merge-index":
@@ -647,6 +687,10 @@ def main_discover() -> int:
 
 def main_download() -> int:
     return _single_command_main("download")
+
+
+def main_sample() -> int:
+    return _single_command_main("sample")
 
 
 def main_unpack() -> int:
