@@ -225,15 +225,15 @@ def _channel_width_to_mhz(value: float, unit: str) -> float:
     return value
 
 
-def _parse_frequency_support_details(value: str | None) -> tuple[list[float], list[int]]:
+def _parse_frequency_support_details(value: str | None) -> list[tuple[float, int | None]]:
     if not value:
-        return [], []
-    widths_mhz: list[float] = []
-    nchans: list[int] = []
+        return []
+    details: list[tuple[float, int | None]] = []
     for block in FREQUENCY_RANGE_RE.findall(value):
         parts = [part.strip() for part in block.strip("[]").split(",")]
         if len(parts) < 1:
             continue
+        width_mhz: float | None = None
         range_match = RANGE_RE.search(parts[0])
         if range_match:
             low = float(range_match.group(1))
@@ -241,7 +241,8 @@ def _parse_frequency_support_details(value: str | None) -> tuple[list[float], li
             unit = range_match.group(3).lower()
             width_mhz = abs(high - low)
             width_mhz = _channel_width_to_mhz(width_mhz, unit)
-            widths_mhz.append(width_mhz)
+        if width_mhz is None:
+            continue
 
         explicit_nchan: int | None = None
         for part in parts[2:]:
@@ -249,18 +250,16 @@ def _parse_frequency_support_details(value: str | None) -> tuple[list[float], li
             if INT_RE.fullmatch(token):
                 explicit_nchan = int(token)
                 break
-        if explicit_nchan is not None:
-            nchans.append(explicit_nchan)
-            continue
-
-        if len(parts) >= 2 and widths_mhz:
+        inferred_nchan = explicit_nchan
+        if inferred_nchan is None and len(parts) >= 2:
             channel_match = WIDTH_RE.search(parts[1])
             if channel_match:
                 channel_width = float(channel_match.group(1))
                 channel_width_mhz = _channel_width_to_mhz(channel_width, channel_match.group(2))
                 if channel_width_mhz > 0:
-                    nchans.append(max(1, int(round(widths_mhz[-1] / channel_width_mhz))))
-    return widths_mhz, nchans
+                    inferred_nchan = max(1, int(round(width_mhz / channel_width_mhz)))
+        details.append((width_mhz, inferred_nchan))
+    return details
 
 
 def _array_label_from_rows(rows: list[dict[str, str]]) -> str:
@@ -333,6 +332,8 @@ def group_rows_to_mous(rows: list[dict[str, str]], filters: dict[str, Any]) -> l
                 "max_spw_total_width_mhz": None,
                 "min_nchan": None,
                 "max_nchan": None,
+                "min_spw_width_nchan": None,
+                "max_spw_width_nchan": None,
                 "array": "UNKNOWN",
                 "max_baseline_m": None,
                 "science_target_count": 0,
@@ -341,8 +342,7 @@ def group_rows_to_mous(rows: list[dict[str, str]], filters: dict[str, Any]) -> l
             },
             "science_targets": set(),
             "execution_uids": set(),
-            "spw_total_widths_mhz": [],
-            "spw_nchans": [],
+            "spw_details": [],
             "spw_count_seen": 0,
             "rows": [],
         }
@@ -393,10 +393,9 @@ def group_rows_to_mous(rows: list[dict[str, str]], filters: dict[str, Any]) -> l
         elif qa2_status == "PASS" and item["qa2_status"] == "UNKNOWN":
             item["qa2_status"] = "PASS"
 
-        widths_mhz, nchans = _parse_frequency_support_details(row.get("frequency_support"))
-        item["spw_total_widths_mhz"].extend(widths_mhz)
-        item["spw_nchans"].extend(nchans)
-        item["spw_count_seen"] += len(widths_mhz)
+        details = _parse_frequency_support_details(row.get("frequency_support"))
+        item["spw_details"].extend(details)
+        item["spw_count_seen"] += len(details)
 
         science_observation = _as_bool(row.get("science_observation"))
         target_name = (row.get("target_name") or "").strip()
@@ -419,14 +418,17 @@ def group_rows_to_mous(rows: list[dict[str, str]], filters: dict[str, Any]) -> l
         if mous_uid in mous_exclude:
             continue
         archive_meta = dict(item["archive_meta"])
-        widths_mhz = sorted(item["spw_total_widths_mhz"])
-        nchans = sorted(item["spw_nchans"])
+        sorted_details = sorted(item["spw_details"], key=lambda pair: (pair[0], pair[1] if pair[1] is not None else -1))
+        widths_mhz = [pair[0] for pair in sorted_details]
+        nchans = sorted(pair[1] for pair in sorted_details if pair[1] is not None)
         archive_meta["execution_count"] = len(item["execution_uids"])
         archive_meta["spw_count"] = item["spw_count_seen"] or None
         archive_meta["min_spw_total_width_mhz"] = widths_mhz[0] if widths_mhz else None
         archive_meta["max_spw_total_width_mhz"] = widths_mhz[-1] if widths_mhz else None
         archive_meta["min_nchan"] = nchans[0] if nchans else None
         archive_meta["max_nchan"] = nchans[-1] if nchans else None
+        archive_meta["min_spw_width_nchan"] = sorted_details[0][1] if sorted_details else None
+        archive_meta["max_spw_width_nchan"] = sorted_details[-1][1] if sorted_details else None
         archive_meta["array"] = _array_label_from_rows(item["rows"])
         archive_meta["max_baseline_m"] = _infer_max_baseline_m(item["rows"])
         archive_meta["science_target_count"] = len(item["science_targets"])

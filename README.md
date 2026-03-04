@@ -207,6 +207,8 @@ Editable text candidate files include one line per MOUS with:
 - band
 - minimum / maximum total SPW width in MHz/GHz
 - minimum / maximum SPW NCHAN
+- NCHAN for the minimum-width SPW
+- NCHAN for the maximum-width SPW
 - array summary (`12m`, `7m`, `TP` from archive metadata)
 - inferred maximum baseline in meters from archive `spatial_resolution` and representative `frequency`
 - number of science targets
@@ -273,8 +275,15 @@ The HTML report currently includes these 2D grids:
 - `science_category` vs `band`
 - `science_category` vs `max_baseline_bin`
 - `band` vs `array`
+- `max_spw_width_bin` vs `max_spw_width_nchan`
+- `min_spw_width_bin` vs `min_spw_width_nchan`
 - `max_baseline_bin` vs `max_spw_width_bin`
 - `min_spw_width_bin` vs `max_spw_width_bin`
+
+Report color key:
+- darker cells mean more population datasets in that cell
+- green-tinted cells mean at least one selected dataset is present
+- pale gray cells mean empty or unselected cells
 
 Re-run later with broader artifact set (only missing deliverables are fetched):
 

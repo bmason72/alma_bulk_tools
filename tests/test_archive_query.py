@@ -92,6 +92,8 @@ def test_group_rows_to_mous_aggregates_discovery_metadata() -> None:
     assert record.archive_meta["max_spw_total_width_mhz"] == 1000.0
     assert record.archive_meta["min_nchan"] == 960
     assert record.archive_meta["max_nchan"] == 3840
+    assert record.archive_meta["min_spw_width_nchan"] == 960
+    assert record.archive_meta["max_spw_width_nchan"] == 3840
     assert record.archive_meta["array"] == "12m+7m+TP"
     assert round(record.archive_meta["max_baseline_m"], 1) == 1972.5
     assert record.archive_meta["science_target_count"] == 2
@@ -128,3 +130,5 @@ def test_group_rows_to_mous_infers_nchan_from_bandwidth_and_channel_width() -> N
     assert record.archive_meta["min_spw_total_width_mhz"] == 1875.0
     assert record.archive_meta["min_nchan"] == 3840
     assert record.archive_meta["max_nchan"] == 3840
+    assert record.archive_meta["min_spw_width_nchan"] == 3840
+    assert record.archive_meta["max_spw_width_nchan"] == 3840

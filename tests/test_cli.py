@@ -30,6 +30,8 @@ def test_discover_cli_writes_editable_candidate_text(monkeypatch, tmp_path: Path
                         "max_spw_total_width_mhz": 2000.0,
                         "min_nchan": 960,
                         "max_nchan": 3840,
+                        "min_spw_width_nchan": 960,
+                        "max_spw_width_nchan": 3840,
                         "array": "12m+TP",
                         "max_baseline_m": 1850.0,
                         "science_target_count": 1,
@@ -62,7 +64,7 @@ def test_discover_cli_writes_editable_candidate_text(monkeypatch, tmp_path: Path
     assert f"Wrote 1 candidates to {out_path}" in captured.out
     assert text.startswith("# alma-bulk discover candidates\n")
     assert "project_code,science_category,mous_uid,sb_name" in text
-    assert "2024.1.00001.S,Galaxy evolution,uid://A001/X1/X2,SB_A,1,2,BAND 6,937.5 MHz,2 GHz,960,3840,12m+TP,1850,1,N,PASS,2023-12-20,2024-01-15,uid://A001/X1/X3,,uid://A002/X100/X200" in text
+    assert "2024.1.00001.S,Galaxy evolution,uid://A001/X1/X2,SB_A,1,2,BAND 6,937.5 MHz,2 GHz,960,3840,960,3840,12m+TP,1850,1,N,PASS,2023-12-20,2024-01-15,uid://A001/X1/X3,,uid://A002/X100/X200" in text
 
 
 def test_sample_cli_writes_selected_candidates_and_report(tmp_path: Path, capsys) -> None:
@@ -74,11 +76,11 @@ def test_sample_cli_writes_selected_candidates_and_report(tmp_path: Path, capsys
         "\n".join(
             [
                 "# alma-bulk discover candidates",
-                "project_code,science_category,mous_uid,sb_name,executions,spws,band,min_spw_total_width,max_spw_total_width,min_nchan,max_nchan,array,max_baseline_m,science_targets,is_mosaic,qa2_status,observation_date,delivery_date,group_ous_uid,science_goal_uid,eb_uids",
-                "2024.1.00001.S,Galaxy evolution,uid://A001/X1/X2,SB_A,1,2,BAND 6,937.5 MHz,2 GHz,960,3840,12m,1850,1,N,PASS,2023-12-20,2024-01-15,uid://A001/X1/X3,,uid://A002/X100/X200",
-                "2024.1.00002.S,Stars and stellar evolution,uid://A001/X1/X4,SB_B,1,2,BAND 3,120 MHz,1.875 GHz,492,1920,7m,55,1,N,PASS,2023-12-21,2024-01-15,uid://A001/X1/X5,,uid://A002/X100/X201",
-                "2024.1.00003.S,Active galaxies,uid://A001/X1/X6,SB_C,1,2,BAND 7,1.875 GHz,2 GHz,1920,1920,12m,3600,1,N,PASS,2023-12-22,2024-01-15,uid://A001/X1/X7,,uid://A002/X100/X202",
-                "2024.1.00004.S,Galaxy evolution,uid://A001/X1/X8,SB_D,1,2,BAND 6,937.5 MHz,2 GHz,960,3840,TP,300,1,N,PASS,2023-12-23,2024-01-15,uid://A001/X1/X9,,uid://A002/X100/X203",
+                "project_code,science_category,mous_uid,sb_name,executions,spws,band,min_spw_total_width,max_spw_total_width,min_nchan,max_nchan,min_spw_width_nchan,max_spw_width_nchan,array,max_baseline_m,science_targets,is_mosaic,qa2_status,observation_date,delivery_date,group_ous_uid,science_goal_uid,eb_uids",
+                "2024.1.00001.S,Galaxy evolution,uid://A001/X1/X2,SB_A,1,2,BAND 6,937.5 MHz,2 GHz,960,3840,960,3840,12m,1850,1,N,PASS,2023-12-20,2024-01-15,uid://A001/X1/X3,,uid://A002/X100/X200",
+                "2024.1.00002.S,Stars and stellar evolution,uid://A001/X1/X4,SB_B,1,2,BAND 3,120 MHz,1.875 GHz,492,1920,492,1920,7m,55,1,N,PASS,2023-12-21,2024-01-15,uid://A001/X1/X5,,uid://A002/X100/X201",
+                "2024.1.00003.S,Active galaxies,uid://A001/X1/X6,SB_C,1,2,BAND 7,1.875 GHz,2 GHz,1920,1920,1920,1920,12m,3600,1,N,PASS,2023-12-22,2024-01-15,uid://A001/X1/X7,,uid://A002/X100/X202",
+                "2024.1.00004.S,Galaxy evolution,uid://A001/X1/X8,SB_D,1,2,BAND 6,937.5 MHz,2 GHz,960,3840,960,3840,TP,300,1,N,PASS,2023-12-23,2024-01-15,uid://A001/X1/X9,,uid://A002/X100/X203",
                 "",
             ]
         ),
@@ -121,6 +123,9 @@ def test_sample_cli_writes_selected_candidates_and_report(tmp_path: Path, capsys
     assert len(sample_rows) == 2
     assert "<h2>science_category vs band</h2>" in report_html
     assert "<h2>science_category vs max_baseline_bin</h2>" in report_html
+    assert "<h2>max_spw_width_bin vs max_spw_width_nchan</h2>" in report_html
+    assert "<h2>min_spw_width_bin vs min_spw_width_nchan</h2>" in report_html
+    assert "Color key:" in report_html
     assert "selected/population" in report_html
     assert len(supplemental_rows) == 1
     assert ",TP," not in supplemental_text

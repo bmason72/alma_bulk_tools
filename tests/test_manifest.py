@@ -69,6 +69,8 @@ def test_editable_text_candidate_file_can_feed_download(tmp_path: Path) -> None:
                 "max_spw_total_width_mhz": 2000.0,
                 "min_nchan": 960,
                 "max_nchan": 3840,
+                "min_spw_width_nchan": 960,
+                "max_spw_width_nchan": 3840,
                 "array": "12m+7m",
                 "max_baseline_m": 1850.0,
                 "science_target_count": 2,
@@ -98,3 +100,5 @@ def test_editable_text_candidate_file_can_feed_download(tmp_path: Path) -> None:
     assert loaded[0].archive_meta["max_spw_total_width_mhz"] == 2000.0
     assert loaded[0].archive_meta["min_nchan"] == 960
     assert loaded[0].archive_meta["max_nchan"] == 3840
+    assert loaded[0].archive_meta["min_spw_width_nchan"] == 960
+    assert loaded[0].archive_meta["max_spw_width_nchan"] == 3840

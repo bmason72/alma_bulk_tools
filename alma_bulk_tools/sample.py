@@ -26,6 +26,8 @@ GRID_SPECS = [
     ("science_category", "band"),
     ("science_category", "max_baseline_bin"),
     ("band", "array"),
+    ("max_spw_width_bin", "max_spw_width_nchan"),
+    ("min_spw_width_bin", "min_spw_width_nchan"),
     ("max_baseline_bin", "max_spw_width_bin"),
     ("min_spw_width_bin", "max_spw_width_bin"),
 ]
@@ -80,6 +82,8 @@ def _annotate_record(record: MousRecord) -> dict[str, Any]:
         "max_baseline_bin": _nearest_center_label(meta.get("max_baseline_m"), BASELINE_BIN_CENTERS_M, "m"),
         "min_spw_width_bin": _nearest_center_label(meta.get("min_spw_total_width_mhz"), SPW_WIDTH_BIN_CENTERS_MHZ, "mhz"),
         "max_spw_width_bin": _nearest_center_label(meta.get("max_spw_total_width_mhz"), SPW_WIDTH_BIN_CENTERS_MHZ, "mhz"),
+        "min_spw_width_nchan": str(meta.get("min_spw_width_nchan") or "UNKNOWN"),
+        "max_spw_width_nchan": str(meta.get("max_spw_width_nchan") or "UNKNOWN"),
     }
 
 
@@ -194,10 +198,24 @@ def _supplemental_rows(
 
 
 def _grid_counts(rows: list[dict[str, Any]], left: str, right: str) -> tuple[list[str], list[str], dict[tuple[str, str], int]]:
-    left_labels = sorted({str(row[left]) for row in rows})
-    right_labels = sorted({str(row[right]) for row in rows})
+    left_labels = _ordered_labels(left, {str(row[left]) for row in rows})
+    right_labels = _ordered_labels(right, {str(row[right]) for row in rows})
     counts: dict[tuple[str, str], int] = Counter((str(row[left]), str(row[right])) for row in rows)
     return left_labels, right_labels, counts
+
+
+def _ordered_labels(dim: str, values: set[str]) -> list[str]:
+    if dim == "max_baseline_bin":
+        order = [_nearest_center_label(value, BASELINE_BIN_CENTERS_M, "m") for value in BASELINE_BIN_CENTERS_M]
+        return [label for label in order if label in values] + sorted(values - set(order))
+    if dim in {"min_spw_width_bin", "max_spw_width_bin"}:
+        order = [_nearest_center_label(value, SPW_WIDTH_BIN_CENTERS_MHZ, "mhz") for value in SPW_WIDTH_BIN_CENTERS_MHZ]
+        return [label for label in order if label in values] + sorted(values - set(order))
+    if dim in {"min_spw_width_nchan", "max_spw_width_nchan"}:
+        known = sorted((int(v), v) for v in values if v.isdigit())
+        unknown = sorted(v for v in values if not v.isdigit())
+        return [raw for _, raw in known] + unknown
+    return sorted(values)
 
 
 def _cell_style(selected: int, total: int, max_total: int) -> str:
@@ -243,6 +261,7 @@ def _report_html(population: list[dict[str, Any]], selected: list[dict[str, Any]
         "th,td{padding:6px 8px;border:1px solid #d0d0d0;text-align:center;vertical-align:middle}"
         "th{background:#eee8dc}.sub{font-size:11px;color:#333}</style></head><body>"
         f"<h1>ALMA Bulk Sampling Report</h1><p>Generated {html.escape(now_utc_iso())}. Cells show selected/population and selection fraction.</p>"
+        "<p><strong>Color key:</strong> darker cells indicate more population datasets in that cell; green-tinted cells indicate at least one selected dataset; pale gray cells indicate empty or unselected cells.</p>"
         + "".join(sections)
         + "</body></html>"
     )
