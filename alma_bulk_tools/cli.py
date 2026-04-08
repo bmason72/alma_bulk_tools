@@ -634,7 +634,7 @@ def _command_status(args: argparse.Namespace) -> int:
     if not dbp.exists():
         print(f"Index DB not found: {dbp}")
         return 1
-    conn = connect_db(dbp)
+    conn = connect_db(dbp, readonly=True)
     report = build_status_report(conn, top_n_errors=args.top_n_errors)
     conn.close()
     print(format_status_report(report), end="")

@@ -82,19 +82,22 @@ def db_path_for(dest: Path, shard_name: str | None = None) -> Path:
     return dest / "alma_index.sqlite"
 
 
-def connect_db(path: Path) -> sqlite3.Connection:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+def connect_db(path: Path, readonly: bool = False) -> sqlite3.Connection:
+    # Lustre/GPFS do not support SQLite file locking reliably. Use URI connections
+    # with locking disabled. This is safe because all pipeline stages run as a single
+    # sequential writer — there is never concurrent write access to the same DB file.
+    if readonly:
+        uri = f"file:{path}?mode=ro&immutable=1"
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        uri = f"file:{path}?nolock=1"
+    conn = sqlite3.connect(uri, uri=True)
     conn.execute("PRAGMA foreign_keys = ON")
-    # Network filesystems (Lustre/GPFS) do not support WAL shared-memory locking.
-    # EXCLUSIVE locking mode avoids the -shm file requirement; DELETE journal is safe
-    # for single-writer use and works on all filesystems. Also converts any existing
-    # WAL-mode DB back to rollback journal on first open.
-    try:
-        conn.execute("PRAGMA locking_mode = EXCLUSIVE")
-        conn.execute("PRAGMA journal_mode = DELETE")
-    except sqlite3.OperationalError:
-        pass
+    if not readonly:
+        try:
+            conn.execute("PRAGMA journal_mode = DELETE")
+        except sqlite3.OperationalError:
+            pass
     return conn
 
 
