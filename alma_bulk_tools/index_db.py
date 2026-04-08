@@ -87,10 +87,10 @@ def connect_db(path: Path, readonly: bool = False) -> sqlite3.Connection:
     # with locking disabled. This is safe because all pipeline stages run as a single
     # sequential writer — there is never concurrent write access to the same DB file.
     if readonly:
-        uri = f"file:{path}?mode=ro&immutable=1"
+        uri = f"file://{path.absolute()}?mode=ro&immutable=1"
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        uri = f"file:{path}?nolock=1"
+        uri = f"file://{path.absolute()}?nolock=1"
     conn = sqlite3.connect(uri, uri=True)
     conn.execute("PRAGMA foreign_keys = ON")
     if not readonly:
