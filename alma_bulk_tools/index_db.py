@@ -86,10 +86,14 @@ def connect_db(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA foreign_keys = ON")
+    # Network filesystems (Lustre/GPFS) do not support WAL shared-memory locking.
+    # EXCLUSIVE locking mode avoids the -shm file requirement; DELETE journal is safe
+    # for single-writer use and works on all filesystems. Also converts any existing
+    # WAL-mode DB back to rollback journal on first open.
     try:
-        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA locking_mode = EXCLUSIVE")
+        conn.execute("PRAGMA journal_mode = DELETE")
     except sqlite3.OperationalError:
-        # WAL mode unsupported on network filesystems (e.g. Lustre); fall back to default
         pass
     return conn
 
