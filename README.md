@@ -25,6 +25,11 @@ pip install -e .[dev]
 - `.jsonl`: machine-oriented records
 - `.txt` / `.csv`: editable comma-separated text with comment lines; delete rows and feed the file directly to `download`, `plan`, or `run-shard`
 
+## Known Issues
+1. spw count per MOUS is wrong. it is something like (number of SPWs) x (number of science products)
+2. Band 5 occasionally shows up as "4 5" for reasons not understood.
+3. Not really an issue just FYI: band to band appears as just the two integers (5 10) without the "BAND" label.
+
 ## Directory layout
 
 Per MOUS, the tool creates an ASA-like tree:
